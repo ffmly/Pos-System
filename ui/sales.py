@@ -98,335 +98,310 @@ class ProductSearchDialog(QDialog):
             QMessageBox.warning(self, "تنبيه", "الرجاء اختيار منتج")
 
 
+class SaleDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle('New Sale')
+        self.setMinimumWidth(800)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Customer info
+        customer_frame = QFormLayout()
+        
+        self.customer_name = QLineEdit()
+        customer_frame.addRow('Customer Name:', self.customer_name)
+        
+        self.customer_phone = QLineEdit()
+        customer_frame.addRow('Phone:', self.customer_phone)
+        
+        layout.addLayout(customer_frame)
+
+        # Product selection
+        product_layout = QHBoxLayout()
+        
+        self.barcode_input = QLineEdit()
+        self.barcode_input.setPlaceholderText('Scan barcode or enter product code')
+        self.barcode_input.returnPressed.connect(self.add_product_by_barcode)
+        product_layout.addWidget(self.barcode_input)
+        
+        self.product_combo = QComboBox()
+        self.load_products()
+        product_layout.addWidget(self.product_combo)
+        
+        self.quantity_input = QSpinBox()
+        self.quantity_input.setMinimum(1)
+        self.quantity_input.setMaximum(9999)
+        self.quantity_input.setValue(1)
+        product_layout.addWidget(self.quantity_input)
+        
+        add_button = QPushButton('Add')
+        add_button.clicked.connect(self.add_product)
+        product_layout.addWidget(add_button)
+        
+        layout.addLayout(product_layout)
+
+        # Items table
+        self.items_table = QTableWidget()
+        self.items_table.setColumnCount(6)
+        self.items_table.setHorizontalHeaderLabels([
+            'Product', 'Price', 'Quantity', 'Total', 'Stock', 'Remove'
+        ])
+        self.items_table.verticalHeader().setVisible(False)
+        layout.addWidget(self.items_table)
+
+        # Totals
+        totals_layout = QFormLayout()
+        
+        self.subtotal_label = QLabel('0.00')
+        totals_layout.addRow('Subtotal:', self.subtotal_label)
+        
+        self.discount_input = QDoubleSpinBox()
+        self.discount_input.setMaximum(9999999.99)
+        self.discount_input.valueChanged.connect(self.calculate_total)
+        totals_layout.addRow('Discount:', self.discount_input)
+        
+        self.tax_input = QDoubleSpinBox()
+        self.tax_input.setMaximum(100)
+        self.tax_input.setValue(15)  # Default tax rate
+        self.tax_input.valueChanged.connect(self.calculate_total)
+        totals_layout.addRow('Tax (%):', self.tax_input)
+        
+        self.total_label = QLabel('0.00')
+        totals_layout.addRow('Total:', self.total_label)
+        
+        self.payment_method = QComboBox()
+        self.payment_method.addItems(['Cash', 'Card', 'Other'])
+        totals_layout.addRow('Payment Method:', self.payment_method)
+        
+        layout.addLayout(totals_layout)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        save_button = QPushButton('Complete Sale')
+        save_button.clicked.connect(self.complete_sale)
+        button_layout.addWidget(save_button)
+        
+        cancel_button = QPushButton('Cancel')
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+    def load_products(self):
+        if self.parent.parent.db_manager.connect():
+            products = self.parent.parent.db_manager.get_products()
+            self.parent.parent.db_manager.disconnect()
+            
+            self.product_combo.clear()
+            for product in products:
+                self.product_combo.addItem(product['name'], product)
+
+    def add_product_by_barcode(self):
+        barcode = self.barcode_input.text().strip()
+        if not barcode:
+            return
+            
+        if self.parent.parent.db_manager.connect():
+            product = self.parent.parent.db_manager.get_product_by_barcode(barcode)
+            self.parent.parent.db_manager.disconnect()
+            
+            if product:
+                self.add_product_to_table(product)
+                self.barcode_input.clear()
+            else:
+                QMessageBox.warning(self, 'Error', 'Product not found')
+
+    def add_product(self):
+        product = self.product_combo.currentData()
+        if product:
+            self.add_product_to_table(product)
+
+    def add_product_to_table(self, product):
+        quantity = self.quantity_input.value()
+        
+        if quantity > product['quantity']:
+            QMessageBox.warning(self, 'Error', 'Insufficient stock')
+            return
+            
+        # Check if product already in table
+        for row in range(self.items_table.rowCount()):
+            if self.items_table.item(row, 0).data(Qt.UserRole)['id'] == product['id']:
+                current_qty = int(self.items_table.item(row, 2).text())
+                new_qty = current_qty + quantity
+                
+                if new_qty > product['quantity']:
+                    QMessageBox.warning(self, 'Error', 'Insufficient stock')
+                    return
+                    
+                self.items_table.item(row, 2).setText(str(new_qty))
+                self.items_table.item(row, 3).setText(f"{new_qty * product['selling_price']:.2f}")
+                self.calculate_total()
+                return
+
+        row = self.items_table.rowCount()
+        self.items_table.insertRow(row)
+        
+        # Product name
+        name_item = QTableWidgetItem(product['name'])
+        name_item.setData(Qt.UserRole, product)
+        self.items_table.setItem(row, 0, name_item)
+        
+        # Price
+        self.items_table.setItem(row, 1, QTableWidgetItem(f"{product['selling_price']:.2f}"))
+        
+        # Quantity
+        self.items_table.setItem(row, 2, QTableWidgetItem(str(quantity)))
+        
+        # Total
+        total = quantity * product['selling_price']
+        self.items_table.setItem(row, 3, QTableWidgetItem(f"{total:.2f}"))
+        
+        # Stock
+        self.items_table.setItem(row, 4, QTableWidgetItem(str(product['quantity'])))
+        
+        # Remove button
+        remove_button = QPushButton('Remove')
+        remove_button.clicked.connect(lambda: self.remove_item(row))
+        self.items_table.setCellWidget(row, 5, remove_button)
+        
+        self.calculate_total()
+
+    def remove_item(self, row):
+        self.items_table.removeRow(row)
+        self.calculate_total()
+
+    def calculate_total(self):
+        subtotal = 0
+        for row in range(self.items_table.rowCount()):
+            subtotal += float(self.items_table.item(row, 3).text())
+        
+        self.subtotal_label.setText(f"{subtotal:.2f}")
+        
+        discount = self.discount_input.value()
+        tax = subtotal * (self.tax_input.value() / 100)
+        
+        total = subtotal - discount + tax
+        self.total_label.setText(f"{total:.2f}")
+
+    def complete_sale(self):
+        if self.items_table.rowCount() == 0:
+            QMessageBox.warning(self, 'Error', 'No items in sale')
+            return
+
+        # Prepare sale data
+        sale_data = {
+            'invoice_number': str(uuid.uuid4())[:8].upper(),
+            'customer_name': self.customer_name.text().strip(),
+            'customer_phone': self.customer_phone.text().strip(),
+            'total_amount': float(self.subtotal_label.text()),
+            'discount': self.discount_input.value(),
+            'tax': float(self.subtotal_label.text()) * (self.tax_input.value() / 100),
+            'final_amount': float(self.total_label.text()),
+            'payment_method': self.payment_method.currentText(),
+            'user_id': self.parent.parent.current_user['id']
+        }
+
+        # Prepare items data
+        items = []
+        for row in range(self.items_table.rowCount()):
+            product = self.items_table.item(row, 0).data(Qt.UserRole)
+            quantity = int(self.items_table.item(row, 2).text())
+            unit_price = float(self.items_table.item(row, 1).text())
+            
+            items.append({
+                'product_id': product['id'],
+                'quantity': quantity,
+                'unit_price': unit_price,
+                'total_price': quantity * unit_price
+            })
+
+        if self.parent.parent.db_manager.connect():
+            # Create sale
+            sale_id = self.parent.parent.db_manager.create_sale(sale_data)
+            if sale_id:
+                # Add sale items
+                if self.parent.parent.db_manager.add_sale_items(sale_id, items):
+                    QMessageBox.information(self, 'Success', 'Sale completed successfully')
+                    self.accept()
+                else:
+                    QMessageBox.critical(self, 'Error', 'Failed to add sale items')
+            else:
+                QMessageBox.critical(self, 'Error', 'Failed to create sale')
+            
+            self.parent.parent.db_manager.disconnect()
+
+
 class SalesWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
-        self.product_model = Product()
-        self.sale_model = Sale()
-        self.sale_item_model = SaleItem()
+        self.init_ui()
+
+    def init_ui(self):
+        # Main layout
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Toolbar
+        toolbar = QHBoxLayout()
         
-        # تهيئة المتغيرات
-        self.current_items = []  # قائمة المنتجات في الفاتورة الحالية
-        self.total_amount = 0.0  # إجمالي المبلغ
-        self.discount = 0.0      # الخصم
-        self.tax = 0.0          # الضريبة
-        self.final_amount = 0.0  # المبلغ النهائي
+        new_sale_button = QPushButton('New Sale')
+        new_sale_button.clicked.connect(self.new_sale)
+        toolbar.addWidget(new_sale_button)
         
-        self.setup_ui()
+        refresh_button = QPushButton('Refresh')
+        refresh_button.clicked.connect(self.load_sales)
+        toolbar.addWidget(refresh_button)
         
-    def setup_ui(self):
-        """إعداد واجهة المستخدم"""
-        main_layout = QVBoxLayout(self)
-        
-        # القسم العلوي - البحث وإضافة المنتجات
-        top_section = QHBoxLayout()
-        
-        # حقل الباركود
-        barcode_layout = QVBoxLayout()
-        barcode_label = QLabel("الباركود:")
-        self.barcode_input = QLineEdit()
-        self.barcode_input.setPlaceholderText("ادخل الباركود أو ابحث عن المنتج")
-        self.barcode_input.returnPressed.connect(self.add_product_by_barcode)
-        barcode_layout.addWidget(barcode_label)
-        barcode_layout.addWidget(self.barcode_input)
-        
-        # زر البحث عن المنتج
-        search_btn = QPushButton("بحث")
-        search_btn.clicked.connect(self.show_product_search)
-        
-        top_section.addLayout(barcode_layout)
-        top_section.addWidget(search_btn)
-        
-        main_layout.addLayout(top_section)
-        
-        # جدول المنتجات
-        self.items_table = QTableWidget()
-        self.items_table.setColumnCount(7)
-        self.items_table.setHorizontalHeaderLabels([
-            "الباركود", "اسم المنتج", "السعر", "الكمية", 
-            "الخصم", "الإجمالي", "حذف"
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        # Sales table
+        self.table = QTableWidget()
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels([
+            'Invoice', 'Customer', 'Total', 'Discount', 'Tax',
+            'Final Amount', 'Payment', 'Date'
         ])
-        self.items_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        main_layout.addWidget(self.items_table)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(self.table)
+
+        self.setLayout(layout)
         
-        # القسم السفلي - تفاصيل الفاتورة
-        bottom_section = QHBoxLayout()
-        
-        # معلومات العميل
-        customer_group = QVBoxLayout()
-        customer_label = QLabel("معلومات العميل")
-        self.customer_name = QLineEdit()
-        self.customer_name.setPlaceholderText("اسم العميل")
-        self.customer_phone = QLineEdit()
-        self.customer_phone.setPlaceholderText("رقم الهاتف")
-        
-        # طريقة الدفع
-        payment_label = QLabel("طريقة الدفع:")
-        self.payment_method = QComboBox()
-        self.payment_method.addItems(["نقدي", "بطاقة ائتمان", "تحويل بنكي"])
-        
-        customer_group.addWidget(customer_label)
-        customer_group.addWidget(self.customer_name)
-        customer_group.addWidget(self.customer_phone)
-        customer_group.addWidget(payment_label)
-        customer_group.addWidget(self.payment_method)
-        
-        # تفاصيل المبلغ
-        amount_group = QVBoxLayout()
-        
-        # الإجمالي
-        total_layout = QHBoxLayout()
-        total_layout.addWidget(QLabel("الإجمالي:"))
-        self.total_label = QLabel("0.00")
-        total_layout.addWidget(self.total_label)
-        
-        # الخصم
-        discount_layout = QHBoxLayout()
-        discount_layout.addWidget(QLabel("الخصم:"))
-        self.discount_input = QDoubleSpinBox()
-        self.discount_input.setMinimum(0)
-        self.discount_input.setMaximum(999999.99)
-        self.discount_input.valueChanged.connect(self.update_totals)
-        discount_layout.addWidget(self.discount_input)
-        
-        # الضريبة
-        tax_layout = QHBoxLayout()
-        tax_layout.addWidget(QLabel("الضريبة (%):"))
-        self.tax_input = QDoubleSpinBox()
-        self.tax_input.setMinimum(0)
-        self.tax_input.setMaximum(100)
-        self.tax_input.setValue(15)  # ضريبة القيمة المضافة الافتراضية
-        self.tax_input.valueChanged.connect(self.update_totals)
-        tax_layout.addWidget(self.tax_input)
-        
-        # المبلغ النهائي
-        final_layout = QHBoxLayout()
-        final_layout.addWidget(QLabel("المبلغ النهائي:"))
-        self.final_label = QLabel("0.00")
-        final_layout.addWidget(self.final_label)
-        
-        amount_group.addLayout(total_layout)
-        amount_group.addLayout(discount_layout)
-        amount_group.addLayout(tax_layout)
-        amount_group.addLayout(final_layout)
-        
-        # أزرار العمليات
-        actions_group = QVBoxLayout()
-        save_btn = QPushButton("حفظ الفاتورة")
-        save_btn.clicked.connect(self.save_invoice)
-        clear_btn = QPushButton("مسح الفاتورة")
-        clear_btn.clicked.connect(self.clear_invoice)
-        
-        actions_group.addWidget(save_btn)
-        actions_group.addWidget(clear_btn)
-        
-        bottom_section.addLayout(customer_group)
-        bottom_section.addLayout(amount_group)
-        bottom_section.addLayout(actions_group)
-        
-        main_layout.addLayout(bottom_section)
-    
-    def add_product_by_barcode(self):
-        """إضافة منتج باستخدام الباركود"""
-        barcode = self.barcode_input.text().strip()
-        if not barcode:
-            return
-        
-        # البحث عن المنتج
-        product = self.product_model.get_product_by_barcode(barcode)
-        if not product:
-            QMessageBox.warning(self, "خطأ", "المنتج غير موجود")
-            return
-        
-        self.add_product_to_invoice(product)
-        self.barcode_input.clear()
-    
-    def show_product_search(self):
-        """عرض نافذة البحث عن المنتجات"""
-        dialog = ProductSearchDialog(self)
-        if dialog.exec_() == QDialog.Accepted and dialog.selected_product:
-            self.add_product_to_invoice(dialog.selected_product)
-    
-    def add_product_to_invoice(self, product):
-        """إضافة منتج إلى الفاتورة"""
-        # التحقق من المخزون
-        if product['quantity'] <= 0:
-            QMessageBox.warning(self, "تنبيه", f"المنتج '{product['name']}' غير متوفر في المخزون")
-            return
-        
-        # التحقق مما إذا كان المنتج موجودًا بالفعل في الفاتورة
-        for i, item in enumerate(self.current_items):
-            if item['product_id'] == product['id']:
-                # زيادة الكمية
-                if item['quantity'] + 1 > product['quantity']:
-                    QMessageBox.warning(self, "تنبيه", f"الكمية المطلوبة غير متوفرة في المخزون")
-                    return
-                
-                item['quantity'] += 1
-                item['total'] = item['price'] * item['quantity'] * (1 - item['discount'] / 100)
-                
-                # تحديث الجدول
-                self.items_table.item(i, 3).setText(str(item['quantity']))
-                self.items_table.item(i, 5).setText(f"{item['total']:.2f}")
-                
-                self.update_totals()
-                return
-        
-        # إضافة منتج جديد
-        item = {
-            'product_id': product['id'],
-            'barcode': product.get('barcode', ''),
-            'name': product['name'],
-            'price': product['price'],
-            'quantity': 1,
-            'discount': 0,
-            'total': product['price']
-        }
-        
-        self.current_items.append(item)
-        
-        # إضافة صف جديد في الجدول
-        row = self.items_table.rowCount()
-        self.items_table.insertRow(row)
-        
-        # إضافة بيانات المنتج
-        self.items_table.setItem(row, 0, QTableWidgetItem(item['barcode']))
-        self.items_table.setItem(row, 1, QTableWidgetItem(item['name']))
-        self.items_table.setItem(row, 2, QTableWidgetItem(f"{item['price']:.2f}"))
-        self.items_table.setItem(row, 3, QTableWidgetItem(str(item['quantity'])))
-        
-        # إضافة حقل الخصم
-        discount_spin = QDoubleSpinBox()
-        discount_spin.setMinimum(0)
-        discount_spin.setMaximum(100)
-        discount_spin.setValue(item['discount'])
-        discount_spin.valueChanged.connect(lambda value, row=row: self.update_item_discount(row, value))
-        self.items_table.setCellWidget(row, 4, discount_spin)
-        
-        self.items_table.setItem(row, 5, QTableWidgetItem(f"{item['total']:.2f}"))
-        
-        # إضافة زر الحذف
-        delete_btn = QPushButton("حذف")
-        delete_btn.clicked.connect(lambda _, row=row: self.remove_item(row))
-        self.items_table.setCellWidget(row, 6, delete_btn)
-        
-        self.update_totals()
-    
-    def update_item_discount(self, row, value):
-        """تحديث خصم المنتج"""
-        if row < 0 or row >= len(self.current_items):
-            return
-        
-        self.current_items[row]['discount'] = value
-        price = self.current_items[row]['price']
-        quantity = self.current_items[row]['quantity']
-        discount = self.current_items[row]['discount']
-        
-        # حساب الإجمالي بعد الخصم
-        total = price * quantity * (1 - discount / 100)
-        self.current_items[row]['total'] = total
-        
-        # تحديث الجدول
-        self.items_table.item(row, 5).setText(f"{total:.2f}")
-        
-        self.update_totals()
-    
-    def remove_item(self, row):
-        """حذف منتج من الفاتورة"""
-        if row < 0 or row >= len(self.current_items):
-            return
-        
-        # حذف العنصر من القائمة
-        self.current_items.pop(row)
-        
-        # حذف الصف من الجدول
-        self.items_table.removeRow(row)
-        
-        # تحديث الإجماليات
-        self.update_totals()
-    
-    def update_totals(self):
-        """تحديث إجماليات الفاتورة"""
-        # حساب إجمالي المبلغ
-        self.total_amount = sum(item['total'] for item in self.current_items)
-        
-        # الحصول على قيمة الخصم
-        self.discount = self.discount_input.value()
-        
-        # الحصول على نسبة الضريبة
-        tax_rate = self.tax_input.value()
-        
-        # حساب قيمة الضريبة
-        subtotal = self.total_amount - self.discount
-        if subtotal < 0:
-            subtotal = 0
-        
-        self.tax = subtotal * (tax_rate / 100)
-        
-        # حساب المبلغ النهائي
-        self.final_amount = subtotal + self.tax
-        
-        # تحديث العناصر
-        self.total_label.setText(f"{self.total_amount:.2f}")
-        self.final_label.setText(f"{self.final_amount:.2f}")
-    
-    def save_invoice(self):
-        """حفظ الفاتورة"""
-        if not self.current_items:
-            QMessageBox.warning(self, "تنبيه", "لا توجد منتجات في الفاتورة")
-            return
-        
-        try:
-            # إنشاء فاتورة جديدة
-            sale_data = {
-                'customer_name': self.customer_name.text(),
-                'customer_phone': self.customer_phone.text(),
-                'total_amount': self.total_amount,
-                'discount': self.discount,
-                'tax': self.tax,
-                'final_amount': self.final_amount,
-                'payment_method': self.payment_method.currentText(),
-                'status': 'completed'
-            }
+        # Load initial data
+        self.load_sales()
+
+    def load_sales(self):
+        if self.parent.db_manager.connect():
+            sales = self.parent.db_manager.get_sales()
+            self.parent.db_manager.disconnect()
             
-            # حفظ الفاتورة
-            sale_id = self.sale_model.add_sale(sale_data)
+            self.table.setRowCount(len(sales))
             
-            if not sale_id:
-                raise Exception("فشل في حفظ الفاتورة")
-            
-            # حفظ عناصر الفاتورة
-            for item in self.current_items:
-                item_data = {
-                    'sale_id': sale_id,
-                    'product_id': item['product_id'],
-                    'quantity': item['quantity'],
-                    'price': item['price'],
-                    'discount': item['discount'],
-                    'total': item['total']
-                }
-                
-                # حفظ عنصر الفاتورة
-                self.sale_item_model.add_sale_item(**item_data)
-                
-                # تحديث المخزون
-                self.product_model.update_stock(item['product_id'], -item['quantity'])
-            
-            QMessageBox.information(self, "نجاح", f"تم حفظ الفاتورة بنجاح. رقم الفاتورة: {sale_id}")
-            
-            # مسح الفاتورة الحالية
-            self.clear_invoice()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء حفظ الفاتورة: {str(e)}")
-    
-    def clear_invoice(self):
-        """مسح الفاتورة الحالية"""
-        self.current_items = []
-        self.items_table.setRowCount(0)
-        self.customer_name.clear()
-        self.customer_phone.clear()
-        self.discount_input.setValue(0)
-        self.tax_input.setValue(15)
-        self.update_totals()
+            for i, sale in enumerate(sales):
+                self.table.setItem(i, 0, QTableWidgetItem(sale['invoice_number']))
+                self.table.setItem(i, 1, QTableWidgetItem(sale['customer_name'] or '-'))
+                self.table.setItem(i, 2, QTableWidgetItem(f"{sale['total_amount']:.2f}"))
+                self.table.setItem(i, 3, QTableWidgetItem(f"{sale['discount']:.2f}"))
+                self.table.setItem(i, 4, QTableWidgetItem(f"{sale['tax']:.2f}"))
+                self.table.setItem(i, 5, QTableWidgetItem(f"{sale['final_amount']:.2f}"))
+                self.table.setItem(i, 6, QTableWidgetItem(sale['payment_method']))
+                self.table.setItem(i, 7, QTableWidgetItem(str(sale['created_at'])))
+
+    def new_sale(self):
+        dialog = SaleDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.load_sales()

@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QComboBox, QDateEdit, QGroupBox, QFormLayout)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QFont
+from datetime import datetime, timedelta
 
 from models.sale import Sale
 from models.product import Product
@@ -38,11 +39,12 @@ class ReportsWidget(QWidget):
         # نوع التقرير
         self.report_type = QComboBox()
         self.report_type.addItems([
-            "تقرير المبيعات", 
-            "تقرير المنتجات الأكثر مبيعاً", 
-            "تقرير المخزون"
+            'Sales Report',
+            'Products Report',
+            'Low Stock Report',
+            'Categories Report'
         ])
-        self.report_type.currentIndexChanged.connect(self.change_report_type)
+        self.report_type.currentIndexChanged.connect(self.load_report)
         
         # تاريخ البداية
         self.start_date = QDateEdit()
@@ -92,33 +94,198 @@ class ReportsWidget(QWidget):
         main_layout.addWidget(self.report_table)
         
         # تهيئة التقرير الافتراضي
-        self.change_report_type(0)
+        self.load_report()
     
-    def change_report_type(self, index):
-        """تغيير نوع التقرير"""
-        if index == 0:  # تقرير المبيعات
-            self.report_table.setColumnCount(7)
-            self.report_table.setHorizontalHeaderLabels([
-                "رقم الفاتورة", "التاريخ", "العميل", "الإجمالي", 
-                "الخصم", "الضريبة", "المبلغ النهائي"
-            ])
-            self.product_combo.setEnabled(False)
+    def load_report(self):
+        report_type = self.report_type.currentText()
         
-        elif index == 1:  # تقرير المنتجات الأكثر مبيعاً
-            self.report_table.setColumnCount(5)
-            self.report_table.setHorizontalHeaderLabels([
-                "المنتج", "الباركود", "الكمية المباعة", 
-                "إجمالي المبيعات", "عدد الفواتير"
-            ])
-            self.product_combo.setEnabled(True)
+        if report_type == 'Sales Report':
+            self.load_sales_report()
+        elif report_type == 'Products Report':
+            self.load_products_report()
+        elif report_type == 'Low Stock Report':
+            self.load_low_stock_report()
+        elif report_type == 'Categories Report':
+            self.load_categories_report()
+    
+    def load_sales_report(self):
+        self.report_table.setRowCount(0)
         
-        elif index == 2:  # تقرير المخزون
-            self.report_table.setColumnCount(5)
-            self.report_table.setHorizontalHeaderLabels([
-                "المنتج", "الباركود", "الكمية المتوفرة", 
-                "الحد الأدنى", "الحالة"
-            ])
-            self.product_combo.setEnabled(True)
+        if self.parent.db_manager.connect():
+            start_date = self.start_date.date().toString(Qt.ISODate)
+            end_date = self.end_date.date().toString(Qt.ISODate)
+            
+            # Get sales data
+            sales = self.parent.db_manager.get_sales(start_date, end_date)
+            
+            self.report_table.setRowCount(len(sales))
+            
+            total_sales = 0
+            total_items = 0
+            total_discount = 0
+            total_tax = 0
+            
+            for i, sale in enumerate(sales):
+                # Get sale items
+                items = self.parent.db_manager.get_sale_items(sale['id'])
+                items_count = sum(item['quantity'] for item in items)
+                
+                self.report_table.insertRow(i)
+                
+                self.report_table.setItem(i, 0, QTableWidgetItem(str(sale['created_at'])))
+                self.report_table.setItem(i, 1, QTableWidgetItem(sale['invoice_number']))
+                self.report_table.setItem(i, 2, QTableWidgetItem(sale['customer_name'] or '-'))
+                self.report_table.setItem(i, 3, QTableWidgetItem(str(items_count)))
+                self.report_table.setItem(i, 4, QTableWidgetItem(f"{sale['total_amount']:.2f}"))
+                self.report_table.setItem(i, 5, QTableWidgetItem(f"{sale['discount']:.2f}"))
+                self.report_table.setItem(i, 6, QTableWidgetItem(f"{sale['tax']:.2f}"))
+                self.report_table.setItem(i, 7, QTableWidgetItem(f"{sale['final_amount']:.2f}"))
+                
+                total_sales += sale['final_amount']
+                total_items += items_count
+                total_discount += sale['discount']
+                total_tax += sale['tax']
+            
+            self.parent.db_manager.disconnect()
+            
+            # Update summary
+            summary = f"""
+                <h3>Sales Summary</h3>
+                <p>
+                    Period: {start_date} to {end_date}<br>
+                    Total Sales: {total_sales:.2f}<br>
+                    Total Items Sold: {total_items}<br>
+                    Total Discounts: {total_discount:.2f}<br>
+                    Total Tax: {total_tax:.2f}
+                </p>
+            """
+            self.summary_label.setText(summary)
+    
+    def load_products_report(self):
+        self.report_table.setRowCount(0)
+        
+        if self.parent.db_manager.connect():
+            products = self.parent.db_manager.get_products()
+            
+            self.report_table.setRowCount(len(products))
+            
+            total_value = 0
+            total_items = 0
+            
+            for i, product in enumerate(products):
+                self.report_table.insertRow(i)
+                
+                self.report_table.setItem(i, 0, QTableWidgetItem(product['name']))
+                self.report_table.setItem(i, 1, QTableWidgetItem(self.get_category_name(product['category_id'])))
+                self.report_table.setItem(i, 2, QTableWidgetItem(f"{product['purchase_price']:.2f}"))
+                self.report_table.setItem(i, 3, QTableWidgetItem(f"{product['selling_price']:.2f}"))
+                self.report_table.setItem(i, 4, QTableWidgetItem(str(product['quantity'])))
+                self.report_table.setItem(i, 5, QTableWidgetItem(str(product['min_quantity'])))
+                
+                value = product['quantity'] * product['purchase_price']
+                self.report_table.setItem(i, 6, QTableWidgetItem(f"{value:.2f}"))
+                
+                total_value += value
+                total_items += product['quantity']
+            
+            self.parent.db_manager.disconnect()
+            
+            # Update summary
+            summary = f"""
+                <h3>Products Summary</h3>
+                <p>
+                    Total Products: {len(products)}<br>
+                    Total Items in Stock: {total_items}<br>
+                    Total Stock Value: {total_value:.2f}
+                </p>
+            """
+            self.summary_label.setText(summary)
+    
+    def load_low_stock_report(self):
+        self.report_table.setRowCount(0)
+        
+        if self.parent.db_manager.connect():
+            products = self.parent.db_manager.get_products()
+            low_stock_products = [p for p in products if p['quantity'] <= p['min_quantity']]
+            
+            self.report_table.setRowCount(len(low_stock_products))
+            
+            for i, product in enumerate(low_stock_products):
+                self.report_table.insertRow(i)
+                
+                self.report_table.setItem(i, 0, QTableWidgetItem(product['name']))
+                self.report_table.setItem(i, 1, QTableWidgetItem(self.get_category_name(product['category_id'])))
+                self.report_table.setItem(i, 2, QTableWidgetItem(str(product['quantity'])))
+                self.report_table.setItem(i, 3, QTableWidgetItem(str(product['min_quantity'])))
+                
+                status = 'Out of Stock' if product['quantity'] == 0 else 'Low Stock'
+                status_item = QTableWidgetItem(status)
+                status_item.setForeground(Qt.red)
+                self.report_table.setItem(i, 4, status_item)
+            
+            self.parent.db_manager.disconnect()
+            
+            # Update summary
+            summary = f"""
+                <h3>Low Stock Summary</h3>
+                <p>
+                    Total Low Stock Items: {len(low_stock_products)}<br>
+                    Out of Stock Items: {len([p for p in low_stock_products if p['quantity'] == 0])}
+                </p>
+            """
+            self.summary_label.setText(summary)
+    
+    def load_categories_report(self):
+        self.report_table.setRowCount(0)
+        
+        if self.parent.db_manager.connect():
+            categories = self.parent.db_manager.get_categories()
+            
+            self.report_table.setRowCount(len(categories))
+            
+            total_products = 0
+            total_stock = 0
+            total_value = 0
+            
+            for i, category in enumerate(categories):
+                # Get products in category
+                products = self.parent.db_manager.get_products(category['id'])
+                
+                products_count = len(products)
+                stock_count = sum(p['quantity'] for p in products)
+                stock_value = sum(p['quantity'] * p['purchase_price'] for p in products)
+                
+                self.report_table.insertRow(i)
+                
+                self.report_table.setItem(i, 0, QTableWidgetItem(category['name']))
+                self.report_table.setItem(i, 1, QTableWidgetItem(str(products_count)))
+                self.report_table.setItem(i, 2, QTableWidgetItem(str(stock_count)))
+                self.report_table.setItem(i, 3, QTableWidgetItem(f"{stock_value:.2f}"))
+                
+                total_products += products_count
+                total_stock += stock_count
+                total_value += stock_value
+            
+            self.parent.db_manager.disconnect()
+            
+            # Update summary
+            summary = f"""
+                <h3>Categories Summary</h3>
+                <p>
+                    Total Categories: {len(categories)}<br>
+                    Total Products: {total_products}<br>
+                    Total Stock: {total_stock}<br>
+                    Total Stock Value: {total_value:.2f}
+                </p>
+            """
+            self.summary_label.setText(summary)
+    
+    def get_category_name(self, category_id):
+        if self.parent.db_manager.connect():
+            category = self.parent.db_manager.get_category(category_id)
+            self.parent.db_manager.disconnect()
+            return category['name'] if category else '-'
+        return '-'
     
     def generate_report(self):
         """إنشاء التقرير"""

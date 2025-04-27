@@ -10,45 +10,69 @@ from models.category import Category
 class CategoryDialog(QDialog):
     def __init__(self, parent=None, category_data=None):
         super().__init__(parent)
+        self.parent = parent
         self.category_data = category_data
-        self.setup_ui()
-        
-    def setup_ui(self):
-        """إعداد واجهة المستخدم"""
-        self.setWindowTitle("إضافة/تعديل فئة")
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle('Add Category' if not self.category_data else 'Edit Category')
         self.setMinimumWidth(400)
         
-        layout = QVBoxLayout(self)
-        
-        # نموذج البيانات
-        form_layout = QFormLayout()
-        
+        layout = QFormLayout()
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Name
         self.name_input = QLineEdit()
-        self.description_input = QTextEdit()
-        
-        form_layout.addRow("اسم الفئة:", self.name_input)
-        form_layout.addRow("الوصف:", self.description_input)
-        
-        layout.addLayout(form_layout)
-        
-        # أزرار الإجراءات
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        
-        layout.addWidget(button_box)
-        
-        # إذا كانت هناك بيانات، قم بملء الحقول
         if self.category_data:
             self.name_input.setText(self.category_data['name'])
-            self.description_input.setText(self.category_data.get('description', ''))
-    
-    def get_category_data(self):
-        """الحصول على بيانات الفئة من الحقول"""
-        return {
-            'name': self.name_input.text(),
-            'description': self.description_input.toPlainText()
-        }
+        layout.addRow('Name:', self.name_input)
+
+        # Description
+        self.description_input = QTextEdit()
+        if self.category_data:
+            self.description_input.setText(self.category_data['description'])
+        self.description_input.setMaximumHeight(100)
+        layout.addRow('Description:', self.description_input)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        save_button = QPushButton('Save')
+        save_button.clicked.connect(self.save_category)
+        cancel_button = QPushButton('Cancel')
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(cancel_button)
+        layout.addRow('', button_layout)
+
+        self.setLayout(layout)
+
+    def save_category(self):
+        name = self.name_input.text().strip()
+        description = self.description_input.toPlainText().strip()
+
+        if not name:
+            QMessageBox.warning(self, 'Error', 'Category name is required')
+            return
+
+        if self.parent.parent.db_manager.connect():
+            category_data = {
+                'name': name,
+                'description': description
+            }
+
+            if self.category_data:  # Update existing category
+                category_data['id'] = self.category_data['id']
+                success = self.parent.parent.db_manager.update_category(category_data)
+            else:  # Add new category
+                success = self.parent.parent.db_manager.add_category(name, description)
+            
+            self.parent.parent.db_manager.disconnect()
+            
+            if success:
+                self.accept()
+            else:
+                QMessageBox.warning(self, 'Error', 'Failed to save category')
 
 class CategoriesWidget(QWidget):
     def __init__(self, parent=None):
@@ -133,48 +157,39 @@ class CategoriesWidget(QWidget):
         """إضافة فئة جديدة"""
         dialog = CategoryDialog(self)
         if dialog.exec_() == QDialog.Accepted:
-            category_data = dialog.get_category_data()
-            
-            if not category_data['name']:
-                QMessageBox.warning(self, "تنبيه", "يجب إدخال اسم الفئة")
-                return
-            
-            try:
-                self.category_model.add_category(category_data)
-                self.load_categories()
-                QMessageBox.information(self, "نجاح", "تمت إضافة الفئة بنجاح")
-            except Exception as e:
-                QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء إضافة الفئة: {str(e)}")
+            self.load_categories()
     
     def edit_category(self, category):
         """تعديل فئة"""
         dialog = CategoryDialog(self, category)
         if dialog.exec_() == QDialog.Accepted:
-            category_data = dialog.get_category_data()
-            
-            if not category_data['name']:
-                QMessageBox.warning(self, "تنبيه", "يجب إدخال اسم الفئة")
-                return
-            
-            try:
-                self.category_model.update_category(category['id'], category_data)
-                self.load_categories()
-                QMessageBox.information(self, "نجاح", "تم تعديل الفئة بنجاح")
-            except Exception as e:
-                QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء تعديل الفئة: {str(e)}")
+            self.load_categories()
     
     def delete_category(self, category):
         """حذف فئة"""
-        confirm = QMessageBox.question(
-            self, "تأكيد الحذف",
-            f"هل أنت متأكد من حذف الفئة '{category['name']}'؟",
-            QMessageBox.Yes | QMessageBox.No
+        # Check if category has products
+        if self.parent.parent.db_manager.connect():
+            products = self.parent.parent.db_manager.get_products(category['id'])
+            self.parent.parent.db_manager.disconnect()
+            
+            if products:
+                QMessageBox.warning(
+                    self, 'Error',
+                    'Cannot delete category that has products. Please remove or reassign the products first.'
+                )
+                return
+
+        reply = QMessageBox.question(
+            self, 'Confirm Delete',
+            f"Are you sure you want to delete category '{category['name']}'?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
         )
         
-        if confirm == QMessageBox.Yes:
-            try:
-                self.category_model.delete_category(category['id'])
-                self.load_categories()
-                QMessageBox.information(self, "نجاح", "تم حذف الفئة بنجاح")
-            except Exception as e:
-                QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء حذف الفئة: {str(e)}")
+        if reply == QMessageBox.Yes:
+            if self.parent.parent.db_manager.connect():
+                if self.parent.parent.db_manager.delete_category(category['id']):
+                    self.load_categories()
+                else:
+                    QMessageBox.warning(self, 'Error', 'Failed to delete category')
+                self.parent.parent.db_manager.disconnect()

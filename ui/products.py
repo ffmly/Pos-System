@@ -2,9 +2,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                             QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
                             QHeaderView, QMessageBox, QDialog, QFormLayout,
                             QDialogButtonBox, QTextEdit, QComboBox, QDoubleSpinBox,
-                            QSpinBox)
+                            QSpinBox, QFileDialog)
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon, QPixmap
 
 from models.product import Product
 from models.category import Category
@@ -12,20 +12,21 @@ from models.category import Category
 class ProductDialog(QDialog):
     def __init__(self, parent=None, product_data=None):
         super().__init__(parent)
+        self.parent = parent
         self.product_data = product_data
         self.category_model = Category()
-        self.setup_ui()
+        self.init_ui()
         
-    def setup_ui(self):
+    def init_ui(self):
         """إعداد واجهة المستخدم"""
         self.setWindowTitle("إضافة/تعديل منتج")
         self.setMinimumWidth(500)
         
-        layout = QVBoxLayout(self)
+        layout = QFormLayout()
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
         
         # نموذج البيانات
-        form_layout = QFormLayout()
-        
         self.barcode_input = QLineEdit()
         self.name_input = QLineEdit()
         self.description_input = QTextEdit()
@@ -40,15 +41,15 @@ class ProductDialog(QDialog):
             self.category_combo.addItem(category['name'], category['id'])
         
         # أسعار وكميات
-        self.price_input = QDoubleSpinBox()
-        self.price_input.setMinimum(0)
-        self.price_input.setMaximum(999999.99)
-        self.price_input.setDecimals(2)
+        self.purchase_price_input = QDoubleSpinBox()
+        self.purchase_price_input.setMinimum(0)
+        self.purchase_price_input.setMaximum(999999.99)
+        self.purchase_price_input.setDecimals(2)
         
-        self.cost_price_input = QDoubleSpinBox()
-        self.cost_price_input.setMinimum(0)
-        self.cost_price_input.setMaximum(999999.99)
-        self.cost_price_input.setDecimals(2)
+        self.selling_price_input = QDoubleSpinBox()
+        self.selling_price_input.setMinimum(0)
+        self.selling_price_input.setMaximum(999999.99)
+        self.selling_price_input.setDecimals(2)
         
         self.quantity_input = QSpinBox()
         self.quantity_input.setMinimum(0)
@@ -60,23 +61,36 @@ class ProductDialog(QDialog):
         self.min_quantity_input.setValue(5)  # قيمة افتراضية
         
         # إضافة الحقول إلى النموذج
-        form_layout.addRow("الباركود:", self.barcode_input)
-        form_layout.addRow("اسم المنتج:", self.name_input)
-        form_layout.addRow("الوصف:", self.description_input)
-        form_layout.addRow("الفئة:", self.category_combo)
-        form_layout.addRow("سعر البيع:", self.price_input)
-        form_layout.addRow("سعر التكلفة:", self.cost_price_input)
-        form_layout.addRow("الكمية:", self.quantity_input)
-        form_layout.addRow("الحد الأدنى للكمية:", self.min_quantity_input)
+        layout.addRow("الباركود:", self.barcode_input)
+        layout.addRow("اسم المنتج:", self.name_input)
+        layout.addRow("الوصف:", self.description_input)
+        layout.addRow("الفئة:", self.category_combo)
+        layout.addRow("سعر الشراء:", self.purchase_price_input)
+        layout.addRow("سعر البيع:", self.selling_price_input)
+        layout.addRow("الكمية:", self.quantity_input)
+        layout.addRow("الحد الأدنى للكمية:", self.min_quantity_input)
         
-        layout.addLayout(form_layout)
+        # إضافة الصورة
+        image_layout = QHBoxLayout()
+        self.image_path_input = QLineEdit()
+        self.image_path_input.setReadOnly(True)
+        image_button = QPushButton("اختر صورة")
+        image_button.clicked.connect(self.browse_image)
+        image_layout.addWidget(self.image_path_input)
+        image_layout.addWidget(image_button)
+        layout.addRow("الصورة:", image_layout)
         
         # أزرار الإجراءات
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
+        button_layout = QHBoxLayout()
+        save_button = QPushButton("حفظ")
+        save_button.clicked.connect(self.save_product)
+        cancel_button = QPushButton("إلغاء")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(cancel_button)
+        layout.addRow("", button_layout)
         
-        layout.addWidget(button_box)
+        self.setLayout(layout)
         
         # إذا كانت هناك بيانات، قم بملء الحقول
         if self.product_data:
@@ -90,10 +104,11 @@ class ProductDialog(QDialog):
                 if index >= 0:
                     self.category_combo.setCurrentIndex(index)
             
-            self.price_input.setValue(self.product_data['price'])
-            self.cost_price_input.setValue(self.product_data['cost_price'])
+            self.purchase_price_input.setValue(self.product_data['purchase_price'])
+            self.selling_price_input.setValue(self.product_data['selling_price'])
             self.quantity_input.setValue(self.product_data['quantity'])
             self.min_quantity_input.setValue(self.product_data['min_quantity'])
+            self.image_path_input.setText(self.product_data.get('image_path', ''))
     
     def get_product_data(self):
         """الحصول على بيانات المنتج من الحقول"""
@@ -104,11 +119,49 @@ class ProductDialog(QDialog):
             'name': self.name_input.text(),
             'description': self.description_input.toPlainText(),
             'category_id': category_id,
-            'price': self.price_input.value(),
-            'cost_price': self.cost_price_input.value(),
+            'purchase_price': self.purchase_price_input.value(),
+            'selling_price': self.selling_price_input.value(),
             'quantity': self.quantity_input.value(),
-            'min_quantity': self.min_quantity_input.value()
+            'min_quantity': self.min_quantity_input.value(),
+            'image_path': self.image_path_input.text()
         }
+
+    def browse_image(self):
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, 'اختر صورة', '',
+            'Image Files (*.png *.jpg *.jpeg *.bmp *.gif)'
+        )
+        if file_name:
+            self.image_path_input.setText(file_name)
+
+    def save_product(self):
+        """حفظ المنتج"""
+        # التحقق من البيانات
+        if not self.name_input.text().strip():
+            QMessageBox.warning(self, "تنبيه", "يجب إدخال اسم المنتج")
+            return
+        
+        if self.selling_price_input.value() <= 0:
+            QMessageBox.warning(self, "تنبيه", "سعر البيع يجب أن يكون أكبر من 0")
+            return
+
+        # إعداد بيانات المنتج
+        product_data = self.get_product_data()
+        
+        if self.parent.parent.db_manager.connect():
+            if self.product_data:  # تحديث منتج موجود
+                product_data['id'] = self.product_data['id']
+                success = self.parent.parent.db_manager.update_product(product_data)
+            else:  # إضافة منتج جديد
+                success = self.parent.parent.db_manager.add_product(product_data)
+            
+            self.parent.parent.db_manager.disconnect()
+            
+            if success:
+                QMessageBox.information(self, "نجاح", "تمت إضافة المنتج بنجاح")
+                self.accept()
+            else:
+                QMessageBox.critical(self, "خطأ", "فشل في حفظ المنتج")
 
 
 class ProductsWidget(QWidget):
@@ -154,7 +207,7 @@ class ProductsWidget(QWidget):
         self.products_table = QTableWidget()
         self.products_table.setColumnCount(9)
         self.products_table.setHorizontalHeaderLabels([
-            "الباركود", "اسم المنتج", "الفئة", "سعر البيع", "سعر التكلفة",
+            "الباركود", "اسم المنتج", "الفئة", "سعر الشراء", "سعر البيع",
             "الكمية", "الحد الأدنى", "تعديل", "حذف"
         ])
         self.products_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -180,8 +233,8 @@ class ProductsWidget(QWidget):
             self.products_table.setItem(row, 0, QTableWidgetItem(product.get('barcode', '')))
             self.products_table.setItem(row, 1, QTableWidgetItem(product['name']))
             self.products_table.setItem(row, 2, QTableWidgetItem(product.get('category_name', '')))
-            self.products_table.setItem(row, 3, QTableWidgetItem(f"{product['price']:.2f}"))
-            self.products_table.setItem(row, 4, QTableWidgetItem(f"{product['cost_price']:.2f}"))
+            self.products_table.setItem(row, 3, QTableWidgetItem(f"{product['purchase_price']:.2f}"))
+            self.products_table.setItem(row, 4, QTableWidgetItem(f"{product['selling_price']:.2f}"))
             
             # تلوين الكمية إذا كانت أقل من الحد الأدنى
             quantity_item = QTableWidgetItem(str(product['quantity']))
@@ -230,4 +283,31 @@ class ProductsWidget(QWidget):
             
             # التحقق من البيانات
             if not product_data['name']:
-                QMessageBox.warning(self, "تنبيه", "
+                QMessageBox.warning(self, "تنبيه", "يجب إدخال اسم المنتج")
+                return
+            
+            # تحديث المنتج
+            result = self.product_model.update_product(product_data)
+            
+            if result:
+                QMessageBox.information(self, "نجاح", "تم تحديث المنتج بنجاح")
+                self.load_products()
+            else:
+                QMessageBox.critical(self, "خطأ", "فشل في تحديث المنتج")
+    
+    def delete_product(self, product):
+        """حذف منتج"""
+        reply = QMessageBox.question(
+            self, 'تأكيد الحذف',
+            f"هل أنت متأكد أنك تريد حذف المنتج '{product['name']}'؟",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            if self.parent.parent.db_manager.connect():
+                if self.parent.parent.db_manager.delete_product(product['id']):
+                    self.load_products()
+                else:
+                    QMessageBox.warning(self, 'خطأ', 'فشل في حذف المنتج')
+                self.parent.parent.db_manager.disconnect()
