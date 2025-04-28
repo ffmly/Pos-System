@@ -78,118 +78,71 @@ class CategoriesWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
-        self.category_model = Category()
-        
-        self.setup_ui()
-        self.load_categories()
-        
-    def setup_ui(self):
-        """إعداد واجهة المستخدم"""
-        main_layout = QVBoxLayout(self)
-        
-        # عنوان الصفحة
-        title_label = QLabel("إدارة الفئات")
-        title_font = QFont()
-        title_font.setPointSize(18)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title_label)
-        
-        # أزرار الإجراءات
-        actions_layout = QHBoxLayout()
-        
-        self.add_btn = QPushButton("إضافة فئة جديدة")
-        self.add_btn.clicked.connect(self.add_category)
-        
-        self.refresh_btn = QPushButton("تحديث")
-        self.refresh_btn.clicked.connect(self.load_categories)
-        
-        actions_layout.addWidget(self.add_btn)
-        actions_layout.addWidget(self.refresh_btn)
-        actions_layout.addStretch()
-        
-        main_layout.addLayout(actions_layout)
-        
-        # جدول الفئات
-        self.categories_table = QTableWidget()
-        self.categories_table.setColumnCount(4)
-        self.categories_table.setHorizontalHeaderLabels([
-            "الرقم", "اسم الفئة", "الوصف", "الإجراءات"
-        ])
-        self.categories_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        
-        main_layout.addWidget(self.categories_table)
-    
-    def load_categories(self):
-        """تحميل الفئات"""
-        categories = self.category_model.get_all_categories()
-        
-        self.categories_table.setRowCount(0)
-        
-        for row, category in enumerate(categories):
-            self.categories_table.insertRow(row)
-            
-            # إضافة بيانات الفئة
-            self.categories_table.setItem(row, 0, QTableWidgetItem(str(category['id'])))
-            self.categories_table.setItem(row, 1, QTableWidgetItem(category['name']))
-            self.categories_table.setItem(row, 2, QTableWidgetItem(category.get('description', '')))
-            
-            # إضافة أزرار الإجراءات
-            actions_layout = QHBoxLayout()
-            actions_layout.setContentsMargins(0, 0, 0, 0)
-            
-            edit_btn = QPushButton("تعديل")
-            edit_btn.clicked.connect(lambda _, c=category: self.edit_category(c))
-            
-            delete_btn = QPushButton("حذف")
-            delete_btn.clicked.connect(lambda _, c=category: self.delete_category(c))
-            
-            actions_layout.addWidget(edit_btn)
-            actions_layout.addWidget(delete_btn)
-            
-            actions_widget = QWidget()
-            actions_widget.setLayout(actions_layout)
-            
-            self.categories_table.setCellWidget(row, 3, actions_widget)
-    
-    def add_category(self):
-        """إضافة فئة جديدة"""
-        dialog = CategoryDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            self.load_categories()
-    
-    def edit_category(self, category):
-        """تعديل فئة"""
-        dialog = CategoryDialog(self, category)
-        if dialog.exec_() == QDialog.Accepted:
-            self.load_categories()
-    
-    def delete_category(self, category):
-        """حذف فئة"""
-        # Check if category has products
-        if self.parent.parent.db_manager.connect():
-            products = self.parent.parent.db_manager.get_products(category['id'])
-            self.parent.parent.db_manager.disconnect()
-            
-            if products:
-                QMessageBox.warning(
-                    self, 'Error',
-                    'Cannot delete category that has products. Please remove or reassign the products first.'
-                )
-                return
+        self.init_ui()
 
-        reply = QMessageBox.question(
-            self, 'Confirm Delete',
-            f"Are you sure you want to delete category '{category['name']}'?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+
+        # Add category section
+        add_section = QHBoxLayout()
         
-        if reply == QMessageBox.Yes:
-            if self.parent.parent.db_manager.connect():
-                if self.parent.parent.db_manager.delete_category(category['id']):
-                    self.load_categories()
-                else:
-                    QMessageBox.warning(self, 'Error', 'Failed to delete category')
-                self.parent.parent.db_manager.disconnect()
+        # Category name input
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Category Name")
+        add_section.addWidget(self.name_input)
+        
+        # Add button
+        add_button = QPushButton("Add Category")
+        add_button.clicked.connect(self.add_category)
+        add_section.addWidget(add_button)
+        
+        layout.addLayout(add_section)
+
+        # Categories table
+        self.categories_table = QTableWidget()
+        self.categories_table.setColumnCount(3)
+        self.categories_table.setHorizontalHeaderLabels(["ID", "Name", "Description"])
+        self.categories_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.categories_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        layout.addWidget(self.categories_table)
+
+        self.setLayout(layout)
+        
+        # Load initial data
+        self.load_categories()
+
+    def add_category(self):
+        """Add a new category"""
+        name = self.name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Error", "Please enter a category name")
+            return
+
+        if self.parent.db_manager.add_category(name):
+            self.name_input.clear()
+            self.load_categories()
+            QMessageBox.information(self, "Success", "Category added successfully")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to add category")
+
+    def load_categories(self):
+        """Load categories from database"""
+        try:
+            categories = self.parent.db_manager.get_categories()
+            self.categories_table.setRowCount(len(categories))
+            
+            for row, category in enumerate(categories):
+                # ID
+                self.categories_table.setItem(row, 0, QTableWidgetItem(str(category[0])))
+                
+                # Name
+                self.categories_table.setItem(row, 1, QTableWidgetItem(category[1]))
+                
+                # Description
+                self.categories_table.setItem(row, 2, QTableWidgetItem(category[2] or ""))
+            
+            self.categories_table.resizeColumnsToContents()
+        except Exception as e:
+            print(f"Error loading categories: {e}")
+            QMessageBox.warning(self, "Error", "Failed to load categories")

@@ -1,5 +1,8 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTabWidget, QMessageBox, QWidget, QVBoxLayout
+import os
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QMessageBox, 
+                           QWidget, QVBoxLayout, QMenuBar, QMenu, QAction, 
+                           QStatusBar)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
@@ -10,65 +13,117 @@ from ui.sales import SalesWidget
 from ui.products import ProductsWidget
 from ui.categories import CategoriesWidget
 from ui.reports import ReportsWidget
+from utils.notifications import NotificationSystem
+from utils.styles import MAIN_STYLE
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.db_manager = DatabaseManager()
         self.current_user = None
+        self.notifications = NotificationSystem(self)
         self.init_ui()
+        self.hide()  # Hide the main window initially
         self.show_login()
 
     def init_ui(self):
         self.setWindowTitle("Point of Sale System")
         self.setMinimumSize(1200, 800)
         
+        # Set window icon
+        self.setWindowIcon(QIcon("resources/images/pos_icon.png"))
+        
+        # Create menu bar
+        self.create_menu_bar()
+        
+        # Create status bar
+        self.statusBar = QStatusBar()
+        self.setStatusBar(self.statusBar)
+        self.statusBar.showMessage("Ready")
+        
         # Create central widget and main layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
         
         # Create tab widget
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
         
-        # Initialize tab widgets
+        # Initialize tab widgets with icons
         self.dashboard = DashboardWidget(self)
         self.sales = SalesWidget(self)
         self.products = ProductsWidget(self)
         self.categories = CategoriesWidget(self)
         self.reports = ReportsWidget(self)
         
-        # Add tabs
-        self.tabs.addTab(self.dashboard, "Dashboard")
-        self.tabs.addTab(self.sales, "Sales")
-        self.tabs.addTab(self.products, "Products")
-        self.tabs.addTab(self.categories, "Categories")
-        self.tabs.addTab(self.reports, "Reports")
+        # Add tabs with icons
+        self.tabs.addTab(self.dashboard, QIcon("resources/images/dashboard.png"), "Dashboard")
+        self.tabs.addTab(self.sales, QIcon("resources/images/sales.png"), "Sales")
+        self.tabs.addTab(self.products, QIcon("resources/images/products.png"), "Products")
+        self.tabs.addTab(self.categories, QIcon("resources/images/categories.png"), "Categories")
+        self.tabs.addTab(self.reports, QIcon("resources/images/reports.png"), "Reports")
         
-        # Set window style
-        self.setStyleSheet('''
-            QMainWindow {
-                background-color: #f5f5f5;
-            }
-            QTabWidget::pane {
-                border: 1px solid #ddd;
-                background-color: white;
-            }
-            QTabBar::tab {
-                background-color: #f0f0f0;
-                border: 1px solid #ddd;
-                padding: 8px 16px;
-                margin-right: 2px;
-            }
-            QTabBar::tab:selected {
-                background-color: white;
-                border-bottom: none;
-            }
-            QTabBar::tab:hover {
-                background-color: #e0e0e0;
-            }
-        ''')
+        # Set application style
+        self.setStyleSheet(MAIN_STYLE)
+
+    def create_menu_bar(self):
+        """Create the menu bar with actions"""
+        menubar = self.menuBar()
+        
+        # File menu
+        file_menu = menubar.addMenu("File")
+        
+        # Add actions to file menu
+        new_sale_action = QAction(QIcon("resources/images/sales.png"), "New Sale", self)
+        new_sale_action.setShortcut("Ctrl+N")
+        new_sale_action.triggered.connect(lambda: self.set_current_tab(1))  # Switch to Sales tab
+        file_menu.addAction(new_sale_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # View menu
+        view_menu = menubar.addMenu("View")
+        
+        # Add actions to view menu
+        dashboard_action = QAction(QIcon("resources/images/dashboard.png"), "Dashboard", self)
+        dashboard_action.triggered.connect(lambda: self.set_current_tab(0))
+        view_menu.addAction(dashboard_action)
+        
+        sales_action = QAction(QIcon("resources/images/sales.png"), "Sales", self)
+        sales_action.triggered.connect(lambda: self.set_current_tab(1))
+        view_menu.addAction(sales_action)
+        
+        products_action = QAction(QIcon("resources/images/products.png"), "Products", self)
+        products_action.triggered.connect(lambda: self.set_current_tab(2))
+        view_menu.addAction(products_action)
+        
+        categories_action = QAction(QIcon("resources/images/categories.png"), "Categories", self)
+        categories_action.triggered.connect(lambda: self.set_current_tab(3))
+        view_menu.addAction(categories_action)
+        
+        reports_action = QAction(QIcon("resources/images/reports.png"), "Reports", self)
+        reports_action.triggered.connect(lambda: self.set_current_tab(4))
+        view_menu.addAction(reports_action)
+        
+        # Help menu
+        help_menu = menubar.addMenu("Help")
+        
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+
+    def show_about(self):
+        """Show about dialog"""
+        QMessageBox.about(self, "About POS System",
+                         "Point of Sale System\nVersion 1.0\n\n"
+                         "A modern POS system built with PyQt5")
 
     def show_login(self):
         self.login_window = LoginWindow(self.db_manager)
@@ -77,8 +132,10 @@ class MainWindow(QMainWindow):
 
     def on_login_successful(self, user_data):
         self.current_user = user_data
-        self.show()
+        self.show()  # Show the main window after successful login
         self.update_ui_for_user()
+        self.dashboard.update_summary()  # Update dashboard after login
+        self.notifications.show_success("Login Successful", f"Welcome back, {user_data['full_name']}!")
 
     def update_ui_for_user(self):
         # Update UI based on user role
@@ -94,14 +151,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event"""
-        reply = QMessageBox.question(
-            self, 'Confirm Exit',
-            "Are you sure you want to exit?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
+        if self.notifications.show_question('Confirm Exit', "Are you sure you want to exit?"):
             event.accept()
         else:
             event.ignore()

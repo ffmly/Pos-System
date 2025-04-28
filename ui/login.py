@@ -3,6 +3,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon, QPixmap
 
+from utils.styles import LOGIN_STYLE
+
 class LoginWindow(QWidget):
     login_successful = pyqtSignal(dict)  # Signal to emit user data on successful login
 
@@ -14,12 +16,13 @@ class LoginWindow(QWidget):
     def init_ui(self):
         self.setWindowTitle('Login - POS System')
         self.setFixedSize(400, 300)
+        self.setWindowIcon(QIcon('resources/images/pos_icon.png'))
         self.setWindowFlags(Qt.WindowCloseButtonHint)
 
         # Main layout
         layout = QVBoxLayout()
-        layout.setSpacing(20)
         layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(10)
 
         # Logo
         logo_label = QLabel()
@@ -30,14 +33,14 @@ class LoginWindow(QWidget):
         layout.addWidget(logo_label)
 
         # Title
-        title_label = QLabel('Point of Sale System')
+        title_label = QLabel('Welcome Back')
+        title_label.setProperty('class', 'title')
         title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet('font-size: 20px; font-weight: bold;')
         layout.addWidget(title_label)
 
         # Username
         username_layout = QHBoxLayout()
-        username_label = QLabel('Username:')
+        username_label = QLabel('Username')
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText('Enter your username')
         username_layout.addWidget(username_label)
@@ -46,7 +49,7 @@ class LoginWindow(QWidget):
 
         # Password
         password_layout = QHBoxLayout()
-        password_label = QLabel('Password:')
+        password_label = QLabel('Password')
         self.password_input = QLineEdit()
         self.password_input.setPlaceholderText('Enter your password')
         self.password_input.setEchoMode(QLineEdit.Password)
@@ -56,48 +59,28 @@ class LoginWindow(QWidget):
 
         # Login button
         self.login_button = QPushButton('Login')
-        self.login_button.setStyleSheet('''
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 8px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        ''')
-        self.login_button.clicked.connect(self.attempt_login)
+        self.login_button.clicked.connect(self.handle_login)
         layout.addWidget(self.login_button)
 
         # Set layout
         self.setLayout(layout)
 
-        # Set window style
-        self.setStyleSheet('''
-            QWidget {
-                background-color: white;
-            }
-            QLabel {
-                color: #333;
-            }
-            QLineEdit {
-                padding: 8px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #4CAF50;
-            }
-        ''')
+        # Apply styles
+        self.setStyleSheet(LOGIN_STYLE)
 
-    def attempt_login(self):
+        # Set focus to username input
+        self.username_input.setFocus()
+
+        # Connect enter key to login
+        self.username_input.returnPressed.connect(self.handle_login)
+        self.password_input.returnPressed.connect(self.handle_login)
+
+    def handle_login(self):
         username = self.username_input.text().strip()
         password = self.password_input.text().strip()
 
         if not username or not password:
-            QMessageBox.warning(self, 'Error', 'Please enter both username and password')
+            QMessageBox.warning(self, 'Login Failed', 'Please enter both username and password.')
             return
 
         if self.db_manager.connect():
@@ -109,7 +92,14 @@ class LoginWindow(QWidget):
                 self.login_successful.emit(user_data)
                 self.close()
             else:
-                QMessageBox.warning(self, 'Error', 'Invalid username or password')
+                QMessageBox.warning(self, 'Login Failed', 'Invalid username or password.')
                 self.password_input.clear()
+                self.password_input.setFocus()
         else:
-            QMessageBox.critical(self, 'Error', 'Could not connect to database') 
+            QMessageBox.critical(self, 'Error', 'Could not connect to database')
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            self.handle_login()
+        else:
+            super().keyPressEvent(event) 

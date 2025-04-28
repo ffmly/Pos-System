@@ -1,9 +1,9 @@
 import sqlite3
-from db.db_manager import DBManager
+from database.db_manager import DatabaseManager
 
 class SaleItem:
     def __init__(self):
-        self.db = DBManager()
+        self.db = DatabaseManager()
     
     def add_sale_item(self, sale_id, product_id, quantity, price, discount, total):
         """إضافة عنصر للفاتورة"""
